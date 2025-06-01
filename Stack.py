@@ -9,6 +9,8 @@ def addArguments(stack: list[int], arguments: list[int]):
         stack.append(arguments[i])
         i += 1
 
+    return amount_of_arguments
+
 
 def removeArguments(stack: list[int], amount_to_delete: int):
     amount_of_arguments = len(stack)

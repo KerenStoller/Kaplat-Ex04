@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from models import CalculatorRequestBody, StackRequestBody, Action
 from Calculate import calculate, checkValidity, checkValidityStackAndOperate
 from Stack import addArguments, removeArguments
-from logger import request_logger, stack_logger, independent_logger, addDitsToRequestLog
+from logger import stack_logger, independent_logger, addDitsToRequestLog
 
 
 app = FastAPI()
@@ -57,8 +57,12 @@ def calculatePage(request: CalculatorRequestBody):
 def stackSize():
     addDitsToRequestLog(logging.INFO, "/calculator/stack/size", "get")
 
-    resultToReturn = {"result": len(app.state.stack)}
+    stackSize = len(app.state.stack)
+    resultToReturn = {"result": stackSize}
 
+
+    stack_logger.info(f"Stack Size is {stackSize}")
+    stack_logger.debug(f"Stack content (first == top): [{app.state.stack}]")
     addDitsToRequestLog(logging.DEBUG)
     return resultToReturn
 
@@ -68,9 +72,13 @@ def stackSize():
 def stackArguments(request: StackRequestBody):
     addDitsToRequestLog(logging.INFO, "/calculator/stack/arguments", "put")
 
-    addArguments(app.state.stack, request.arguments)
-    resultToReturn = {"result": len(app.state.stack)}
+    stackSizeBefore = len(app.state.stack)
+    amountAdded = addArguments(app.state.stack, request.arguments)
+    stackSize = len(app.state.stack)
+    resultToReturn = {"result": stackSize}
 
+    stack_logger.info(f"Adding total of {amountAdded} argument(s) to the stack | Stack size: {stackSize}")
+    stack_logger.debug(f"Adding arguments: {request.arguments} | Stack size before {stackSizeBefore} | stack size after {stackSize}")
     addDitsToRequestLog(logging.DEBUG)
     return resultToReturn
 
@@ -100,6 +108,10 @@ def stackOperate(operation: str):
 
     resultToReturn = {"result": result}
 
+
+    stackSize = len(app.state.stack)
+    stack_logger.info(f"Performing operation {operation}. Result is {result} | stack size: {stackSize}")
+    stack_logger.debug(f"Performing operation: {operation}({arguments}) = {result}")
     addDitsToRequestLog(logging.DEBUG)
     return resultToReturn
 
@@ -113,8 +125,10 @@ def deleteStackArguments(count: int):
     if error_response:
         return error_response
 
-    resultToReturn = {"result": len(app.state.stack)}
+    stackSize = len(app.state.stack)
+    resultToReturn = {"result": stackSize}
 
+    stack_logger.info(f"Removing total {count} argument(s) from the stack | Stack size: {stackSize}")
     addDitsToRequestLog(logging.DEBUG)
     return resultToReturn
 
@@ -127,10 +141,12 @@ def getHistory(flavor: str | None = None):
     #no other case will be checked
     if flavor == 'STACK':
         resultToReturn =  {"result": app.state.stack_history}
+        stack_logger.info(f"History: So far total {app.state.stack_history.count} stack actions")
     if flavor == 'INDEPENDENT':
         resultToReturn = {"result": app.state.independent_history}
     else:
         resultToReturn = {"result": app.state.stack_history + app.state.independent_history}
+        stack_logger.info(f"History: So far total {app.state.stack_history.count} stack actions")
 
     addDitsToRequestLog(logging.DEBUG)
     return resultToReturn
