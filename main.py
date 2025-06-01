@@ -1,12 +1,15 @@
-import uvicorn
+import logging
+from turtledemo.paint import switchupdown
 
+import uvicorn
 from starlette.datastructures import State
 from fastapi import FastAPI
-from starlette.responses import JSONResponse
 
 from models import CalculatorRequestBody, StackRequestBody, Action
 from Calculate import calculate, checkValidity, checkValidityStackAndOperate
 from Stack import addArguments, removeArguments
+from logger import request_logger, stack_logger, independent_logger, addDitsToRequestLog
+
 
 app = FastAPI()
 app.state = State()
@@ -17,11 +20,17 @@ app.state.independent_history = []
 
 @app.get("/calculator/health")
 def health():
-    return "OK"
+    addDitsToRequestLog(logging.INFO, "/calculator/health", "get")
+
+    resultToReturn = "OK"
+
+    addDitsToRequestLog(logging.DEBUG)
+    return resultToReturn
 
 
 @app.post("/calculator/independent/calculate")
 def calculatePage(request: CalculatorRequestBody):
+    addDitsToRequestLog(logging.INFO, "/calculator/independent/calculate", "post")
 
     is_there_an_error = checkValidity(request.arguments, request.operation)
     if is_there_an_error:
@@ -37,22 +46,40 @@ def calculatePage(request: CalculatorRequestBody):
     action = Action(flavor="INDEPENDENT", operation=request.operation.lower(), arguments=request.arguments, result=result)
     app.state.independent_history.append(action)
 
-    return {"result": result}
+    resultToReturn = {"result": result}
+
+    addDitsToRequestLog(logging.DEBUG)
+    return resultToReturn
+
 
 
 @app.get("/calculator/stack/size")
 def stackSize():
-    return {"result": len(app.state.stack)}
+    addDitsToRequestLog(logging.INFO, "/calculator/stack/size", "get")
+
+    resultToReturn = {"result": len(app.state.stack)}
+
+    addDitsToRequestLog(logging.DEBUG)
+    return resultToReturn
+
 
 
 @app.put("/calculator/stack/arguments")
 def stackArguments(request: StackRequestBody):
+    addDitsToRequestLog(logging.INFO, "/calculator/stack/arguments", "put")
+
     addArguments(app.state.stack, request.arguments)
-    return {"result": len(app.state.stack)}
+    resultToReturn = {"result": len(app.state.stack)}
+
+    addDitsToRequestLog(logging.DEBUG)
+    return resultToReturn
+
 
 
 @app.get("/calculator/stack/operate")
 def stackOperate(operation: str):
+    addDitsToRequestLog(logging.INFO, "/calculator/stack/operate", "get")
+
     response = checkValidityStackAndOperate(app.state.stack, operation)
 
     if "Error" in response:
@@ -71,28 +98,42 @@ def stackOperate(operation: str):
     action = Action(flavor="STACK", operation=operation.lower(), arguments=arguments, result=result)
     app.state.stack_history.append(action)
 
-    return {"result": result}
+    resultToReturn = {"result": result}
+
+    addDitsToRequestLog(logging.DEBUG)
+    return resultToReturn
+
 
 
 @app.delete("/calculator/stack/arguments")
 def deleteStackArguments(count: int):
+    addDitsToRequestLog(logging.INFO, "/calculator/stack/arguments", "delete")
+
     error_response = removeArguments(app.state.stack, count)
     if error_response:
         return error_response
 
-    return {"result": len(app.state.stack)}
+    resultToReturn = {"result": len(app.state.stack)}
+
+    addDitsToRequestLog(logging.DEBUG)
+    return resultToReturn
+
 
 
 @app.get("/calculator/history")
 def getHistory(flavor: str | None = None):
+    addDitsToRequestLog(logging.INFO, "//calculator/history", "get")
 
     #no other case will be checked
     if flavor == 'STACK':
-        return {"result": app.state.stack_history}
+        resultToReturn =  {"result": app.state.stack_history}
     if flavor == 'INDEPENDENT':
-        return {"result": app.state.independent_history}
+        resultToReturn = {"result": app.state.independent_history}
     else:
-        return {"result": app.state.stack_history + app.state.independent_history}
+        resultToReturn = {"result": app.state.stack_history + app.state.independent_history}
+
+    addDitsToRequestLog(logging.DEBUG)
+    return resultToReturn
 
 
 
