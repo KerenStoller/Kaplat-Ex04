@@ -34,6 +34,7 @@ def create_logger(name, log_file, level=logging.INFO, to_console=False):
 
     return logger
 
+
 request_logger = create_logger("request-logger", "requests.log", logging.INFO, True)
 stack_logger = create_logger("stack-logger", "stack.log", logging.INFO)
 independent_logger = create_logger("independent-logger", "independent.log", logging.DEBUG)
