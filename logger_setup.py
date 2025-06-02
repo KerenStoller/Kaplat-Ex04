@@ -1,134 +1,122 @@
 ######################################################################################################
 #                                   logger creation                                                  #
 ######################################################################################################
-
-
 import logging
-import os
-
-# Create logs directory if it doesn't exist
-os.makedirs("logs", exist_ok=True)
-
-log_format = "%(asctime)s %(levelname)s: %(message)s | request #%(request_number)s "
-date_format = "%d-%m-%Y %H:%M:%S"
-formatter = logging.Formatter(log_format, datefmt=date_format)
-
-def create_logger(name, log_file, level=logging.INFO, to_console=False):
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-    logger.propagate = False  # prevent duplicate logs if root logger is configured
-
-    # Create full log file path inside logs/ directory
-    log_path = os.path.join("logs", log_file)
-
-    # File handler
-    file_handler = logging.FileHandler(log_path, mode='w')
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-
-    # Console handler (optional)
-    if to_console:
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
-
-    return logger
-
-
-request_logger = create_logger("request-logger", "requests.log", logging.INFO, True)
-stack_logger = create_logger("stack-logger", "stack.log", logging.INFO)
-independent_logger = create_logger("independent-logger", "independent.log", logging.DEBUG)
-logs = [request_logger, stack_logger, independent_logger]
-
-
-
-######################################################################################################
-#                                   functions to write logs                                          #
-######################################################################################################
-
-
-
 import time
-request_counter = 0
-request_start_time = 0
+import os
+import sys
+import atexit
 
-def addInfoLogToRequest(resource_name, http_verb):
-    global request_start_time
-    request_start_time = time.perf_counter()
-    global request_counter
-    request_counter += 1
-    log_details = f"Incoming request | #{request_counter} | resource: {resource_name} | HTTP Verb {http_verb.upper()}"
-    request_logger.info(log_details, extra={"request_number": request_counter})
-
-
-def addDebugLogToRequest():
-    global request_counter
-    global request_start_time
-    duration = (time.perf_counter() - request_start_time) * 1000  # ms
-    duration = round(duration, 1)
-    log_details = f"request #{request_counter} duration: {duration:.1f}ms"
-    request_logger.debug(log_details, extra={"request_number": request_counter})
+def get_base_dir():
+    if getattr(sys, 'frozen', False):
+        # If the app is bundled via PyInstaller
+        return os.path.dirname(sys.executable)
+    else:
+        # If running as a normal script
+        return os.path.dirname(os.path.abspath(__file__))
 
 
-def addErrorLog(logger, message):
-    global request_counter
-    logger.error(f"Server encountered an error ! message: {message}", extra={"request_number": request_counter})
-    addDebugLogToRequest()
+class LoggerManager:
+    log_format = "%(asctime)s %(levelname)s: %(message)s | request #%(request_number)s "
+    date_format = "%d-%m-%Y %H:%M:%S"
 
-def addInfoLog(logger, message):
-    global request_counter
-    logger.info(message, extra={"request_number": request_counter})
+    def __init__(self):
+        self.formatter = logging.Formatter(self.log_format, datefmt=self.date_format)
+        self.request_counter = 0
+        self.request_start_time = 0
+        self.all_logs_path = os.path.join(get_base_dir(), "logs")
+        os.makedirs(self.all_logs_path, exist_ok=True)
+        self.request_logger = self.create_logger("request-logger", "requests.log", logging.INFO, True)
+        self.stack_logger = self.create_logger("stack-logger", "stack.log", logging.INFO)
+        self.independent_logger = self.create_logger("independent-logger", "independent.log", logging.DEBUG)
+        self.logs = [self.request_logger, self.stack_logger, self.independent_logger]
+        # Register shutdown handler to flush and close handlers
+        atexit.register(self.close_handlers)
 
-def addDebugLog(logger, message):
-    global request_counter
-    logger.debug(message, extra={"request_number": request_counter})
+    def close_handlers(self):
+        for logger in self.logs:
+            for handler in logger.handlers:
+                handler.flush()
+                handler.close()
 
+    def create_logger(self, name, log_file, level=logging.INFO, to_console=False):
+        logger = logging.getLogger(name)
+        if not logger.hasHandlers():
+            logger.setLevel(level)
+            logger.propagate = False
 
+            log_path = os.path.join(self.all_logs_path, log_file)
+            file_handler = logging.FileHandler(log_path, mode='a')
+            file_handler.setFormatter(self.formatter)
+            logger.addHandler(file_handler)
 
-######################################################################################################
-#                               functions to help implement                                          #
-######################################################################################################
+            if to_console:
+                console_handler = logging.StreamHandler()
+                console_handler.setFormatter(self.formatter)
+                logger.addHandler(console_handler)
 
+        return logger
 
-#private
-def getLog(logger_name):
-    for log in logs:
-        if log.name == logger_name:
-            return {"Logger": log}
-    return {"Error" : f"No log by the name '{logger_name}'"}
+    ######################################################################################################
+    #                               logging methods                                                      #
+    ######################################################################################################
 
-#public
-def getLogLevelInUpper(logger_name):
-    response = getLog(logger_name)
+    def add_info_log_to_request(self, resource_name, http_verb):
+        self.request_start_time = time.perf_counter()
+        self.request_counter += 1
+        log_details = f"Incoming request | #{self.request_counter} | resource: {resource_name} | HTTP Verb {http_verb.upper()}"
+        self.request_logger.info(log_details, extra={"request_number": self.request_counter})
 
-    if "Error" in response:
-        return response
+    def add_debug_log_to_request(self):
+        duration = (time.perf_counter() - self.request_start_time) * 1000  # ms
+        duration = round(duration, 1)
+        log_details = f"request #{self.request_counter} duration: {duration:.1f}ms"
+        self.request_logger.debug(log_details, extra={"request_number": self.request_counter})
 
-    logger = response["Logger"]
-    current_level = logger.getEffectiveLevel()
-    level_name = logging.getLevelName(current_level)
-    return level_name.upper()
+    def add_error_log(self, logger, message):
+        logger.error(f"Server encountered an error ! message: {message}",
+                     extra={"request_number": self.request_counter})
+        self.add_debug_log_to_request()
 
-#private
-def isValidLevel(level):
-    if level.upper() == "ERROR":
-        return level.upper()
-    if level.upper() == "INFO":
-        return level.upper()
-    if level.upper() == "DEBUG":
-        return level.upper()
-    return {"Error": f"Invalid log level '{level}'"}
+    def add_info_log(self, logger, message):
+        logger.info(message, extra={"request_number": self.request_counter})
 
-#public
-def updateLogLevel(name_of_logger, level):
-    response = getLog(name_of_logger)
-    if "Error" in response:
-        return response
+    def add_debug_log(self, logger, message):
+        logger.debug(message, extra={"request_number": self.request_counter})
 
-    logger = response["Logger"]
-    new_logger_level = isValidLevel(level)
-    if "Error" in new_logger_level:
-        return new_logger_level
+    ######################################################################################################
+    #                               functions to help implement                                          #
+    ######################################################################################################
+    def get_log(self, logger_name):
+        for log in self.logs:
+            if log.name == logger_name:
+                return {"Logger": log}
+        return {"Error": f"No log by the name '{logger_name}'"}
 
-    logger.setLevel(new_logger_level)
-    return getLogLevelInUpper(name_of_logger)
+    def get_log_level_in_upper(self, logger_name):
+        response = self.get_log(logger_name)
+        if "Error" in response:
+            return response
+
+        logger = response["Logger"]
+        current_level = logger.getEffectiveLevel()
+        level_name = logging.getLevelName(current_level)
+        return level_name.upper()
+
+    def is_valid_level(self, level):
+        if level.upper() in {"ERROR", "INFO", "DEBUG"}:
+            return level.upper()
+        return {"Error": f"Invalid log level '{level}'"}
+
+    def update_log_level(self, name_of_logger, level):
+        response = self.get_log(name_of_logger)
+        if "Error" in response:
+            return response
+
+        logger = response["Logger"]
+        new_logger_level = self.is_valid_level(level)
+        if "Error" in new_logger_level:
+            return new_logger_level
+
+        logger.setLevel(new_logger_level)
+        return self.get_log_level_in_upper(name_of_logger)
