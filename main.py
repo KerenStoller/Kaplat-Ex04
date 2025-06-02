@@ -1,14 +1,20 @@
-import logging
-from turtledemo.paint import switchupdown
-
+import json
 import uvicorn
 from starlette.datastructures import State
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 
 from models import CalculatorRequestBody, StackRequestBody, Action
 from Calculate import calculate, checkValidity, checkValidityStackAndOperate
 from Stack import addArguments, removeArguments
-from logger import stack_logger, independent_logger, addDitsToRequestLog
+from logger import (stack_logger,
+                    independent_logger,
+                    addInfoLogToRequest,
+                    addDebugLogToRequest,
+                    addInfoLog,
+                    addDebugLog,
+                    addErrorLog,
+                    updateLogLevel,
+                    getLogLevelInUpper)
 
 
 app = FastAPI()
@@ -20,77 +26,86 @@ app.state.independent_history = []
 
 @app.get("/calculator/health")
 def health():
-    addDitsToRequestLog(logging.INFO, "/calculator/health", "get")
+    addInfoLogToRequest("/calculator/health", "get")
 
-    resultToReturn = "OK"
+    result_to_return = "OK"
 
-    addDitsToRequestLog(logging.DEBUG)
-    return resultToReturn
+    addDebugLogToRequest()
+    return result_to_return
 
 
 @app.post("/calculator/independent/calculate")
 def calculatePage(request: CalculatorRequestBody):
-    addDitsToRequestLog(logging.INFO, "/calculator/independent/calculate", "post")
+    addInfoLogToRequest("/calculator/independent/calculate", "post")
 
-    is_there_an_error = checkValidity(request.arguments, request.operation)
+    operation = request.operation
+    arguments = request.arguments
+
+    is_there_an_error = checkValidity(arguments, operation)
     if is_there_an_error:
+        body_dict = json.loads(is_there_an_error.body.decode())
+        addErrorLog(independent_logger, body_dict["errorMessage"])
         return is_there_an_error
 
     result = calculate(request)
 
     if "Error" in result:
+        body_dict = json.loads(result["Error"].body.decode())
+        addErrorLog(independent_logger, body_dict["errorMessage"])
         return result["Error"]
 
     result = result["result"]
 
-    action = Action(flavor="INDEPENDENT", operation=request.operation.lower(), arguments=request.arguments, result=result)
+    action = Action(flavor="INDEPENDENT", operation=operation.lower(), arguments=arguments, result=result)
     app.state.independent_history.append(action)
+    result_to_return = {"result": result}
 
-    resultToReturn = {"result": result}
-
-    addDitsToRequestLog(logging.DEBUG)
-    return resultToReturn
+    addInfoLog(independent_logger, f"Performing operation {operation}. Result is {result}")
+    addDebugLog(independent_logger, f"Performing operation: {operation}({','.join(map(str, arguments))}) = {result}")
+    addDebugLogToRequest()
+    return result_to_return
 
 
 
 @app.get("/calculator/stack/size")
-def stackSize():
-    addDitsToRequestLog(logging.INFO, "/calculator/stack/size", "get")
+def getStackSize():
+    addInfoLogToRequest("/calculator/stack/size", "get")
 
-    stackSize = len(app.state.stack)
-    resultToReturn = {"result": stackSize}
+    stack_size = len(app.state.stack)
+    result_to_return = {"result": stack_size}
 
-
-    stack_logger.info(f"Stack Size is {stackSize}")
-    stack_logger.debug(f"Stack content (first == top): [{app.state.stack}]")
-    addDitsToRequestLog(logging.DEBUG)
-    return resultToReturn
+    addInfoLog(stack_logger, f"Stack size is {stack_size}")
+    addDebugLog(stack_logger, f"Stack content (first == top): [{', '.join(map(str, reversed(app.state.stack)))}]")
+    addDebugLogToRequest()
+    return result_to_return
 
 
 
 @app.put("/calculator/stack/arguments")
 def stackArguments(request: StackRequestBody):
-    addDitsToRequestLog(logging.INFO, "/calculator/stack/arguments", "put")
+    addInfoLogToRequest("/calculator/stack/arguments", "put")
 
-    stackSizeBefore = len(app.state.stack)
-    amountAdded = addArguments(app.state.stack, request.arguments)
-    stackSize = len(app.state.stack)
-    resultToReturn = {"result": stackSize}
+    stack_size_before = len(app.state.stack)
+    amount_added = addArguments(app.state.stack, request.arguments)
+    stack_size = len(app.state.stack)
+    result_to_return = {"result": stack_size}
 
-    stack_logger.info(f"Adding total of {amountAdded} argument(s) to the stack | Stack size: {stackSize}")
-    stack_logger.debug(f"Adding arguments: {request.arguments} | Stack size before {stackSizeBefore} | stack size after {stackSize}")
-    addDitsToRequestLog(logging.DEBUG)
-    return resultToReturn
+    addInfoLog(stack_logger, f"Adding total of {amount_added} argument(s) to the stack | Stack size: {stack_size}")
+    addDebugLog(stack_logger, f"Adding arguments: {','.join(map(str, request.arguments))} | Stack size before {stack_size_before} | stack size after {stack_size}")
+    addDebugLogToRequest()
+    return result_to_return
 
 
 
 @app.get("/calculator/stack/operate")
 def stackOperate(operation: str):
-    addDitsToRequestLog(logging.INFO, "/calculator/stack/operate", "get")
+    addInfoLogToRequest("/calculator/stack/operate", "get")
 
     response = checkValidityStackAndOperate(app.state.stack, operation)
 
     if "Error" in response:
+        body_dict = json.loads(response["Error"].body.decode())
+        addErrorLog(stack_logger, body_dict["errorMessage"])
         return response["Error"]
 
     arguments = response["arguments"]
@@ -99,6 +114,8 @@ def stackOperate(operation: str):
     result = calculate(request)
 
     if "Error" in result:
+        body_dict = json.loads(response["Error"].body.decode())
+        addErrorLog(stack_logger, body_dict["errorMessage"])
         return result["Error"]
 
     result = result["result"]
@@ -106,51 +123,83 @@ def stackOperate(operation: str):
     action = Action(flavor="STACK", operation=operation.lower(), arguments=arguments, result=result)
     app.state.stack_history.append(action)
 
-    resultToReturn = {"result": result}
+    result_to_return = {"result": result}
 
 
-    stackSize = len(app.state.stack)
-    stack_logger.info(f"Performing operation {operation}. Result is {result} | stack size: {stackSize}")
-    stack_logger.debug(f"Performing operation: {operation}({arguments}) = {result}")
-    addDitsToRequestLog(logging.DEBUG)
-    return resultToReturn
+    stack_size = len(app.state.stack)
+    addInfoLog(stack_logger, f"Performing operation {operation}. Result is {result} | stack size: {stack_size}")
+    addDebugLog(stack_logger, f"Performing operation: {operation}({','.join(map(str, arguments))}) = {result}")
+    addDebugLogToRequest()
+    return result_to_return
 
 
 
 @app.delete("/calculator/stack/arguments")
 def deleteStackArguments(count: int):
-    addDitsToRequestLog(logging.INFO, "/calculator/stack/arguments", "delete")
+    addInfoLogToRequest("/calculator/stack/arguments", "delete")
 
     error_response = removeArguments(app.state.stack, count)
     if error_response:
+        body_dict = json.loads(error_response.body.decode())
+        addErrorLog(stack_logger, body_dict["errorMessage"])
         return error_response
 
-    stackSize = len(app.state.stack)
-    resultToReturn = {"result": stackSize}
+    stack_size = len(app.state.stack)
+    result_to_return = {"result": stack_size}
 
-    stack_logger.info(f"Removing total {count} argument(s) from the stack | Stack size: {stackSize}")
-    addDitsToRequestLog(logging.DEBUG)
-    return resultToReturn
+    addInfoLog(stack_logger, f"Removing total {count} argument(s) from the stack | Stack size: {stack_size}")
+    addDebugLogToRequest()
+    return result_to_return
 
 
 
 @app.get("/calculator/history")
 def getHistory(flavor: str | None = None):
-    addDitsToRequestLog(logging.INFO, "//calculator/history", "get")
+    addInfoLogToRequest("/calculator/history", "get")
 
     #no other case will be checked
     if flavor == 'STACK':
-        resultToReturn =  {"result": app.state.stack_history}
-        stack_logger.info(f"History: So far total {app.state.stack_history.count} stack actions")
-    if flavor == 'INDEPENDENT':
-        resultToReturn = {"result": app.state.independent_history}
+        result_to_return =  {"result": app.state.stack_history}
+        addInfoLog(stack_logger, f"History: So far total {len(app.state.stack_history)} stack actions")
+    elif flavor == 'INDEPENDENT':
+        result_to_return = {"result": app.state.independent_history}
+        addInfoLog(independent_logger, f"History: So far total {len(app.state.independent_history)} independent actions")
     else:
-        resultToReturn = {"result": app.state.stack_history + app.state.independent_history}
-        stack_logger.info(f"History: So far total {app.state.stack_history.count} stack actions")
+        result_to_return = {"result": app.state.stack_history + app.state.independent_history}
+        addInfoLog(stack_logger, f"History: So far total {len(app.state.stack_history)} stack actions")
+        addInfoLog(independent_logger, f"History: So far total {len(app.state.independent_history)} independent actions")
 
-    addDitsToRequestLog(logging.DEBUG)
-    return resultToReturn
+    addDebugLogToRequest()
+    return result_to_return
 
+
+@app.get("/logs/level")
+def getLogLevel(logger_name: str = Query(..., alias="logger-name")):
+    addInfoLogToRequest("/logs/level", "get")
+
+    response = getLogLevelInUpper(logger_name)
+    if "Error" in response:
+        addErrorLog(stack_logger, response["Error"])
+        return response["Error"]
+
+    addDebugLogToRequest()
+    return response
+
+
+@app.put("/logs/level")
+def putLogLevel(
+    logger_name: str = Query(..., alias="logger-name"),
+    logger_level: str = Query(..., alias="logger-level")
+):
+    addInfoLogToRequest("/logs/level", "put")
+
+    response = updateLogLevel(logger_name, logger_level)
+    if "Error" in response:
+        addErrorLog(stack_logger, response["Error"])
+        return response["Error"]
+
+    addDebugLogToRequest()
+    return response
 
 
 if __name__ == "__main__":
